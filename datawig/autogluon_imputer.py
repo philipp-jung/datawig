@@ -21,11 +21,13 @@ import os, shutil, warnings
 
 from typing import List, Dict, Any, Callable
 
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from sklearn.metrics import precision_recall_curve, classification_report, mean_absolute_error
 from sklearn.model_selection import train_test_split
 
+SHAPs = List[np.array]
 
 class TargetColumnException(Exception):
     """Raised when a target column cannot be used as label for a supervised learning model"""
@@ -63,6 +65,64 @@ class AutoGluonImputer():
         self.numerical_confidence_quantile = numerical_confidence_quantile
         self.verbosity = verbosity
         self.predictor = None
+
+
+    def shap_explain(self,
+            train_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+            model_name: str = None,
+            shap_sample_size: int = 1000,
+            baseline_sample_size: int = 250) -> SHAPs:
+        """
+        Explains AutoGluonImputer model by calculating SHAP values.
+
+        :param train_df: training data as dataframe
+        :param test_df: test data as dataframe; if not provided, a ratio of test_split of the
+                            training data are used as test data
+        :param model_name: name of the AutoGluon model you want to explain; if not provided,
+                            automatically use the model that AutoGluon determines performs
+                            best during training
+        :param shap_sample_size: number of times the model is re-evaluated when explaining
+                            each prediction. More samples lead to lower variance erstimates
+                            of the SHAP values and increase evaluation time.
+        :param baseline_sample_size: number of samples to construct a background dataset.
+                                        when permutating rows to simulate missing features,
+                                        values from a baseline dataset are taken.
+        """
+
+        import shap
+
+        class AGWrapper:
+            """
+            A wrapper around AutoGluon that makes it callable by shap.KernelExplainer.
+            The APIs of AG and SHAP are not compatible otherwise unfortunately
+
+            The code is copied from Nick Erickson, the original code is here:
+            https://github.com/awslabs/autogluon/tree/master/examples/tabular/interpret
+            """
+            def __init__(self, predictor, feature_names, model_name=None):
+                self.ag_model = predictor
+                self.feature_names = feature_names
+                self.model_name = model_name
+
+            def predict_proba(self, X):
+                if isinstance(X, pd.Series):
+                    X = X.values.reshape(1, -1)
+                if not isinstance(X, pd.DataFrame):
+                    X = pd.DataFrame(X, columns=self.feature_names)
+                return self.ag_model.predict_proba(X, model=self.model_name)
+
+
+        # TODO implement k-means summarization for large datasets
+        # (see SHAP's documentation)
+        baseline = train_df.sample(baseline_sample_size)
+        ag_wrapper = AGWrapper(self.predictor,
+                train_df.columns,
+                model_name=model_name)
+        explainer = shap.KernelExplainer(model=ag_wrapper.predict_proba,
+                data=baseline)
+        shap_values = explainer.shap_values(X=test_df, nsamples=shap_sample_size)
+        return shap_values, explainer.expected_value
 
 
     def fit(self,

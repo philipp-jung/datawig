@@ -15,3 +15,5 @@ build
 experiments/
 docs/_build
 
+.ipynb_checkpoints/
+AutogluonModels/
