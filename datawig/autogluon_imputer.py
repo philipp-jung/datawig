@@ -173,7 +173,7 @@ class AutoGluonImputer():
                 if self.precision_threshold > 0:
                     above_precision = above_precision & \
                         (probas[label] >= self.precision_thresholds[label])
-                df.loc[above_precision, self.output_column + "_imputed"] = label
+                df.loc[above_precision, str(self.output_column) + "_imputed"] = label
         else:
             imputations = self.predictor.predict(df)
             if self.numerical_confidence_quantile > 0:
@@ -230,23 +230,23 @@ class AutoGluonImputer():
         return data_frame
 
 
-        def save(self):
-            """
+    def save(self):
+        """
 
-            Saves model to disk; mxnet module and imputer are stored separately
+        Saves model to disk; mxnet module and imputer are stored separately
 
-            """
-            raise(NotImplementedError)
+        """
+        raise(NotImplementedError)
 
-        @staticmethod
-        def load(output_path: str) -> Any:
-            """
+    @staticmethod
+    def load(output_path: str) -> Any:
+        """
 
-            Loads model from output path
+        Loads model from output path
 
-            :param output_path: output_path field of trained SimpleImputer model
-            :return: AutoGluonImputer model
+        :param output_path: output_path field of trained SimpleImputer model
+        :return: AutoGluonImputer model
 
-            """
+        """
 
-            raise(NotImplementedError)
+        raise(NotImplementedError)
