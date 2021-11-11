@@ -17,7 +17,11 @@ AutoGluon Imputer:
 Imputes missing values in tables based on autogluon-tabular
 
 """
-import os, shutil, warnings
+import os
+import pickle
+import inspect
+import warnings
+from autogluon.tabular import TabularPredictor
 
 from typing import List, Dict, Any, Callable
 
@@ -31,7 +35,6 @@ class TargetColumnException(Exception):
     """Raised when a target column cannot be used as label for a supervised learning model"""
     pass
 
-from autogluon.tabular import TabularPredictor
 
 class AutoGluonImputer():
 
@@ -39,11 +42,13 @@ class AutoGluonImputer():
 
     AutoGluonImputer model
 
+    :param model_name: name of the AutoGluonImputer (as tring)
     :param input_columns: list of input column names (as strings)
     :param output_column: output column name (as string)
     :param precision_threshold: precision threshold for imputation of categorical values; if predictions on a validation set were below that threshold, no imputation will be made
     :param numerical_confidence_quantile: confidence quantile for imputation of numerical values (very experimental)
-    :param verbosity: verbosity level
+    :param verbosity: verbosity level from 0 to 2
+    :param output_path: path to which the AutoGluonImputer is saved to
 
     Example usage:
 
@@ -51,26 +56,43 @@ class AutoGluonImputer():
     """
 
     def __init__(self,
-             output_column: str = None,
-             input_columns: List[str] = None,
-             precision_threshold: float = 0.0,
-             numerical_confidence_quantile: float = 0.0,
-             verbosity: int = 0) -> None:
+                 model_name: str,
+                 output_column: str = None,
+                 input_columns: List[str] = None,
+                 precision_threshold: float = 0.0,
+                 numerical_confidence_quantile: float = 0.0,
+                 verbosity: int = 0,
+                 output_path: str = '') -> None:
 
+        self.model_name = model_name
         self.input_columns = input_columns
         self.output_column = output_column
         self.precision_threshold = precision_threshold
         self.numerical_confidence_quantile = numerical_confidence_quantile
         self.verbosity = verbosity
         self.predictor = None
+        self.predictor_mean_absolute_error = None
+        self.output_path = '.' if output_path == '' else output_path
 
+    @property
+    def imputed_column_name(self):
+        return str(self.output_column) + "_imputed"
+
+    @property
+    def datawig_model_path(self):
+        return os.path.join(self.output_path,
+                            'datawigModels',
+                            f'{self.model_name}.pickle')
+
+    @property
+    def ag_model_path(self):
+        return os.path.join(self.output_path, 'agModels', self.model_name)
 
     def fit(self,
             train_df: pd.DataFrame,
             test_df: pd.DataFrame = None,
             test_split: float = .1,
             time_limit: int = 30) -> Any:
-
         """
 
         Trains AutoGluonImputer model for a single column
@@ -83,31 +105,37 @@ class AutoGluonImputer():
         :param time_limit: time limit for AutoGluon in seconds
         """
         if not test_df:
-            train_df,  test_df  =  train_test_split(train_df.copy(), test_size=test_split)
+            train_df, test_df = train_test_split(train_df.copy(),
+                                                 test_size=test_split)
 
         if not self.input_columns or len(self.input_columns) == 0:
-            self.input_columns = [c for c in train_df.columns if c is not self.output_column]
+            self.input_columns = [
+                c for c in train_df.columns if c is not self.output_column]
 
         if not is_numeric_dtype(train_df[self.output_column]):
             if train_df[self.output_column].value_counts().max() < 10:
-                raise TargetColumnException("Maximum class count below 10, cannot train imputation model")
+                raise TargetColumnException(
+                    "Maximum class count below 10, cannot train imputation model")
 
             self.predictor = TabularPredictor(label=self.output_column,
                                               problem_type='multiclass',
+                                              path=self.ag_model_path,
                                               verbosity=0).\
-                                                 fit(train_data=train_df.dropna(subset=[self.output_column]),
-                                                        time_limit=time_limit,
-                                                        verbosity=self.verbosity)
+                fit(train_data=train_df.dropna(subset=[self.output_column]),
+                    time_limit=time_limit,
+                    verbosity=self.verbosity)
             y_test = test_df.dropna(subset=[self.output_column])
 
-            # prec-rec curves for finding the likelihood thresholds for minimal precision
+            # prec-rec curves for finding the likelihood thresholds for minimal
+            # precision.
             self.precision_thresholds = {}
             probas = self.predictor.predict_proba(y_test)
 
             for col_name in probas.columns:
-                prec, rec, thresholds = precision_recall_curve(y_test[self.output_column]==col_name,
-                                                              probas[col_name], pos_label=True)
-                threshold_idx = max(min((prec >= self.precision_threshold).nonzero()[0][0], len(thresholds)-1), 0)
+                prec, rec, thresholds = precision_recall_curve(y_test[self.output_column] == col_name,
+                                                               probas[col_name], pos_label=True)
+                threshold_idx = max(min((prec >= self.precision_threshold).nonzero()[
+                                    0][0], len(thresholds)-1), 0)
                 threshold_for_minimal_precision = thresholds[threshold_idx]
                 self.precision_thresholds[col_name] = threshold_for_minimal_precision
 
@@ -115,7 +143,6 @@ class AutoGluonImputer():
                                                                 self.predictor.predict(y_test))
 
         else:
-
             if self.numerical_confidence_quantile == 0.:
                 quantile = 1e-5
             else:
@@ -124,16 +151,19 @@ class AutoGluonImputer():
             self.quantiles = [quantile, .5, 1-quantile]
 
             self.predictor = TabularPredictor(
-                                            label=self.output_column,
-                                            quantile_levels=self.quantiles,
-                                            problem_type='quantile',
-                                            verbosity=0)\
-                                                .fit(train_data=train_df.dropna(subset=[self.output_column]),
-                                                    time_limit=time_limit)
+                label=self.output_column,
+                path=self.ag_model_path,
+                quantile_levels=self.quantiles,
+                problem_type='quantile',
+                verbosity=0)\
+                .fit(train_data=train_df.dropna(subset=[self.output_column]),
+                     time_limit=time_limit)
 
             y_test = test_df[self.output_column].dropna()
-            y_pred = self.predictor.predict(test_df.dropna(subset=[self.output_column]))
-            self.predictor.mean_absolute_error = mean_absolute_error(y_test, y_pred[self.quantiles[1]])
+            y_pred = self.predictor.predict(
+                test_df.dropna(subset=[self.output_column]))
+            self.predictor_mean_absolute_error = mean_absolute_error(
+                y_test, y_pred[self.quantiles[1]])
 
         return self
 
@@ -169,25 +199,34 @@ class AutoGluonImputer():
             imputations = self.predictor.predict(df)
             probas = self.predictor.predict_proba(df)
             for label in self.precision_thresholds.keys():
-                above_precision = (imputations == label)
-                if self.precision_threshold > 0:
-                    above_precision = above_precision & \
+                class_mask = (imputations == label)
+                if self.precision_threshold == 0:  # user set no threshold
+                    df.loc[class_mask, self.imputed_column_name] = label
+                elif self.precision_threshold > 0:  # user set a threshold
+                    above_precision = class_mask & \
                         (probas[label] >= self.precision_thresholds[label])
-                df.loc[above_precision, self.output_column + "_imputed"] = label
+                    df.loc[above_precision, self.imputed_column_name] = label
+                else:
+                    raise ValueError('The indicated precision threshold of '
+                                     f'{self.precision_threshold} is '
+                                     'negative, and thus invalid.')
+
         else:
             imputations = self.predictor.predict(df)
             if self.numerical_confidence_quantile > 0:
-                confidence_tube = imputations[self.quantiles[2]] - imputations[self.quantiles[0]]
-                error_smaller_than_confidence_tube = confidence_tube > self.predictor.mean_absolute_error
-                df.loc[error_smaller_than_confidence_tube, self.output_column + "_imputed"] = \
-                    imputations.loc[error_smaller_than_confidence_tube, self.quantiles[1]]
+                confidence_tube = imputations[self.quantiles[2]]
+                - imputations[self.quantiles[0]]
+                error_smaller_than_confidence_tube = confidence_tube > self.predictor_mean_absolute_error
+                df.loc[error_smaller_than_confidence_tube, self.imputed_column_name] = \
+                    imputations.loc[error_smaller_than_confidence_tube,
+                                    self.quantiles[1]]
 
         return df
 
     @staticmethod
     def complete(data_frame: pd.DataFrame,
                  precision_threshold: float = 0.0,
-                 numeric_confidence_quantile = 0.0,
+                 numeric_confidence_quantile=0.0,
                  inplace: bool = False,
                  time_limit: float = 60.,
                  verbosity=0):
@@ -218,35 +257,63 @@ class AutoGluonImputer():
             idx_missing = missing_mask[output_col]
             try:
                 imputer = AutoGluonImputer(input_columns=input_cols,
-                                        output_column=output_col,
-                                        precision_threshold = 0.0,
-                                        numerical_confidence_quantile = 0.05,
-                                        verbosity=verbosity)\
-                                            .fit(data_frame, time_limit=time_limit)
+                                           output_column=output_col,
+                                           precision_threshold=0.0,
+                                           numerical_confidence_quantile=0.05,
+                                           verbosity=verbosity)\
+                    .fit(data_frame, time_limit=time_limit)
                 tmp = imputer.predict(data_frame)
-                data_frame.loc[idx_missing, output_col] = tmp[output_col + "_imputed"]
+                data_frame.loc[idx_missing,
+                               output_col] = tmp[output_col + "_imputed"]
             except TargetColumnException:
                 warnings.warn(f'Could not train model on column {output_col}')
         return data_frame
 
+    def save(self):
+        """
 
-        def save(self):
-            """
+        Saves model to disk. Requires the directory
+        `{self.output_path}/datawig_models` to exist.
 
-            Saves model to disk; mxnet module and imputer are stored separately
+        """
+        params = {k: v for k, v in self.__dict__.items() if k != 'module'}
+        pickle.dump(params, open(self.datawig_model_path, "wb"))
 
-            """
-            raise(NotImplementedError)
+    @staticmethod
+    def load(output_path: str, model_name: str) -> Any:
+        """
 
-        @staticmethod
-        def load(output_path: str) -> Any:
-            """
+        Loads model from output path. Expects
+        - a folder `{output_path}/datawigModels` to exist and contain
+          `{model_name}.pickle`, itself containing a serialized
+          AutoGluonImputer.
+        - a folder `{output_path}/agModels` to exist and contain a folder
+          named `model_name`, itself containing AutoGluon serialized models.
 
-            Loads model from output path
+        :param model_name: string name of the AutoGluonImputer model
+        :param output_path: path containing agModels/ and datawigModels/ folders
+        :return: AutoGluonImputer model
 
-            :param output_path: output_path field of trained SimpleImputer model
-            :return: AutoGluonImputer model
+        """
+        params = pickle.load(open(os.path.join(output_path,
+                                               "datawigModels",
+                                               f"{model_name}.pickle"), "rb"))
+        imputer_signature = inspect.getfullargspec(
+            AutoGluonImputer.__init__)[0]
 
-            """
+        constructor_args = {p: params[p]
+                            for p in imputer_signature if p != 'self'}
+        non_constructor_args = {p: params[p] for p in params.keys() if
+                                p not in ['self'] + list(constructor_args.keys())}
 
-            raise(NotImplementedError)
+        # use all relevant fields to instantiate AutoGluonImputer
+        imputer = AutoGluonImputer(**constructor_args)
+        # then set all other args
+        for arg, value in non_constructor_args.items():
+            setattr(imputer, arg, value)
+
+        # lastly, load AG Model
+        imputer.predictor = TabularPredictor.load(os.path.join(output_path,
+                                                               "agModels",
+                                                               model_name))
+        return imputer
