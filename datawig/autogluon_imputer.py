@@ -225,10 +225,11 @@ class AutoGluonImputer():
 
     @staticmethod
     def complete(data_frame: pd.DataFrame,
-                 precision_threshold: float = 0.0,
-                 numeric_confidence_quantile=0.0,
+                 precision_threshold: float = 0.95,
+                 numerical_confidence_quantile=0.05,
+                 model_name: str = "complete_model",
                  inplace: bool = False,
-                 time_limit: float = 60.,
+                 time_limit: int = 30,
                  verbosity=0):
         """
         Given a dataframe with missing values, this function detects all imputable columns, trains an imputation model
@@ -249,22 +250,22 @@ class AutoGluonImputer():
         if inplace is False:
             data_frame = data_frame.copy()
 
-        for output_col in data_frame.columns:
+        for output_col in list(data_frame.columns):
 
             input_cols = list(set(data_frame.columns) - set([output_col]))
 
             # train on all observed values
             idx_missing = missing_mask[output_col]
             try:
-                imputer = AutoGluonImputer(input_columns=input_cols,
+                imputer = AutoGluonImputer(model_name=model_name,
+                                           input_columns=input_cols,
                                            output_column=output_col,
-                                           precision_threshold=0.0,
-                                           numerical_confidence_quantile=0.05,
+                                           precision_threshold=precision_threshold,
+                                           numerical_confidence_quantile=numerical_confidence_quantile,
                                            verbosity=verbosity)\
                     .fit(data_frame, time_limit=time_limit)
                 tmp = imputer.predict(data_frame)
-                data_frame.loc[idx_missing,
-                               output_col] = tmp[output_col + "_imputed"]
+                data_frame.loc[idx_missing, output_col] = tmp[str(output_col) + "_imputed"]
             except TargetColumnException:
                 warnings.warn(f'Could not train model on column {output_col}')
         return data_frame
