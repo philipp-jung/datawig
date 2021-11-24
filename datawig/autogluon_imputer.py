@@ -62,7 +62,8 @@ class AutoGluonImputer():
                  precision_threshold: float = 0.0,
                  numerical_confidence_quantile: float = 0.0,
                  verbosity: int = 0,
-                 output_path: str = '') -> None:
+                 output_path: str = '',
+                 force_multiclass: bool = False) -> None:
 
         self.model_name = model_name
         self.input_columns = input_columns
@@ -73,6 +74,7 @@ class AutoGluonImputer():
         self.predictor = None
         self.predictor_mean_absolute_error = None
         self.output_path = '.' if output_path == '' else output_path
+        self.force_multiclass = force_multiclass
 
     @property
     def imputed_column_name(self):
@@ -92,7 +94,8 @@ class AutoGluonImputer():
             train_df: pd.DataFrame,
             test_df: pd.DataFrame = None,
             test_split: float = .1,
-            time_limit: int = 30) -> Any:
+            time_limit: int = 30,
+            ) -> Any:
         """
 
         Trains AutoGluonImputer model for a single column
@@ -112,7 +115,7 @@ class AutoGluonImputer():
             self.input_columns = [
                 c for c in train_df.columns if c is not self.output_column]
 
-        if not is_numeric_dtype(train_df[self.output_column]):
+        if self.force_multiclass or not is_numeric_dtype(train_df[self.output_column]):
             if train_df[self.output_column].value_counts().max() < 10:
                 raise TargetColumnException(
                     "Maximum class count below 10, cannot train imputation model")
@@ -133,7 +136,8 @@ class AutoGluonImputer():
 
             for col_name in probas.columns:
                 prec, rec, thresholds = precision_recall_curve(y_test[self.output_column] == col_name,
-                                                               probas[col_name], pos_label=True)
+                                                               probas[col_name],
+                                                               pos_label=True)
                 threshold_idx = max(min((prec >= self.precision_threshold).nonzero()[
                                     0][0], len(thresholds)-1), 0)
                 threshold_for_minimal_precision = thresholds[threshold_idx]
@@ -172,7 +176,8 @@ class AutoGluonImputer():
                 precision_threshold: float = 0.0,
                 numerical_confidence_interval: float = 1.0,
                 imputation_suffix: str = "_imputed",
-                inplace: bool = False):
+                inplace: bool = False,
+                return_probas: bool = False):
         """
         Imputes most likely value if it is above a certain precision threshold determined on the
             validation set
@@ -195,9 +200,11 @@ class AutoGluonImputer():
         else:
             df = data_frame
 
-        if not is_numeric_dtype(df[self.output_column]):
+        if self.force_multiclass or not is_numeric_dtype(df[self.output_column]):
             imputations = self.predictor.predict(df)
             probas = self.predictor.predict_proba(df)
+            if return_probas:
+                return probas
             for label in self.precision_thresholds.keys():
                 class_mask = (imputations == label)
                 if self.precision_threshold == 0:  # user set no threshold
@@ -206,6 +213,7 @@ class AutoGluonImputer():
                     above_precision = class_mask & \
                         (probas[label] >= self.precision_thresholds[label])
                     df.loc[above_precision, self.imputed_column_name] = label
+                    breakpoint()
                 else:
                     raise ValueError('The indicated precision threshold of '
                                      f'{self.precision_threshold} is '
