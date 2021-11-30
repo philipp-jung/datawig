@@ -53,14 +53,11 @@ class AutoGluonImputer():
     def __init__(self,
              output_column: str = None,
              input_columns: List[str] = None,
-             precision_threshold: float = 0.0,
              numerical_confidence_quantile: float = 0.0,
              verbosity: int = 0) -> None:
 
         self.input_columns = input_columns
         self.output_column = output_column
-        self.precision_threshold = precision_threshold
-        self.numerical_confidence_quantile = numerical_confidence_quantile
         self.verbosity = verbosity
         self.predictor = None
 
@@ -97,7 +94,8 @@ class AutoGluonImputer():
                                               verbosity=0).\
                                                  fit(train_data=train_df.dropna(subset=[self.output_column]),
                                                         time_limit=time_limit,
-                                                        verbosity=self.verbosity)
+                                                        verbosity=self.verbosity,
+                                                        excluded_model_types=['GBM', 'XGB']) # due to libopm issue on OSX described here https://github.com/awslabs/autogluon/issues/1296
             y_test = test_df.dropna(subset=[self.output_column])
 
             # prec-rec curves for finding the likelihood thresholds for minimal precision
@@ -107,9 +105,7 @@ class AutoGluonImputer():
             for col_name in probas.columns:
                 prec, rec, thresholds = precision_recall_curve(y_test[self.output_column]==col_name,
                                                               probas[col_name], pos_label=True)
-                threshold_idx = max(min((prec >= self.precision_threshold).nonzero()[0][0], len(thresholds)-1), 0)
-                threshold_for_minimal_precision = thresholds[threshold_idx]
-                self.precision_thresholds[col_name] = threshold_for_minimal_precision
+                self.precision_thresholds[col_name] = {'precisions': prec, 'thresholds': thresholds}
 
             self.classification_metrics = classification_report(y_test[self.output_column],
                                                                 self.predictor.predict(y_test))
@@ -127,7 +123,7 @@ class AutoGluonImputer():
                                             label=self.output_column,
                                             quantile_levels=self.quantiles,
                                             problem_type='quantile',
-                                            verbosity=0)\
+                                            verbosity=self.verbosity)\
                                                 .fit(train_data=train_df.dropna(subset=[self.output_column]),
                                                     time_limit=time_limit)
 
@@ -165,15 +161,19 @@ class AutoGluonImputer():
         else:
             df = data_frame
 
-        if not is_numeric_dtype(df[self.output_column]):
+        if self.predictor.info()['problem_type'] != 'quantile':
             imputations = self.predictor.predict(df)
             probas = self.predictor.predict_proba(df)
             for label in self.precision_thresholds.keys():
                 above_precision = (imputations == label)
-                if self.precision_threshold > 0:
+                precisions = self.precision_thresholds[label]['precisions']
+                thresholds = self.precision_thresholds[label]['thresholds']
+                precision_above = (precisions >= precision_threshold).nonzero()[0][0]
+                threshold_for_minimal_precision = thresholds[min(precision_above, len(thresholds)-1)]
+                if precision_threshold > 0:
                     above_precision = above_precision & \
-                        (probas[label] >= self.precision_thresholds[label])
-                df.loc[above_precision, self.output_column + "_imputed"] = label
+                        (probas[label] >= threshold_for_minimal_precision)
+                df.loc[above_precision, str(self.output_column) + imputation_suffix] = label
         else:
             imputations = self.predictor.predict(df)
             if self.numerical_confidence_quantile > 0:
