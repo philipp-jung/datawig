@@ -213,7 +213,6 @@ class AutoGluonImputer():
                     above_precision = class_mask & \
                         (probas[label] >= self.precision_thresholds[label])
                     df.loc[above_precision, self.imputed_column_name] = label
-                    breakpoint()
                 else:
                     raise ValueError('The indicated precision threshold of '
                                      f'{self.precision_threshold} is '

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from datawig import AutoGluonImputer
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, f1_score
 
 
 def rand_string(length: int = 16) -> str:
@@ -66,9 +66,57 @@ def data_frame():
     return _inner_impl
 
 
-def test_imputer(data_frame):
+def test_quantile_regression(data_frame):
     """
-    Basic integration test that tests AutoGluonImputer with default settings.
+    Basic integration test that tests AutoGluonImputer's quantile regression
+    with default settings.
+    """
+
+    feature_col = "string_feature"
+    label_col = "label"
+
+    n_samples = 1000
+    num_labels = 3
+    seq_len = 30
+    vocab_size = int(2 ** 10)
+
+    # generate some random data
+    random_data = data_frame(feature_col=feature_col,
+                             label_col=label_col,
+                             vocab_size=vocab_size,
+                             num_labels=num_labels,
+                             num_words=seq_len,
+                             n_samples=n_samples)
+
+    numeric_data = np.random.uniform(-np.pi, np.pi, (n_samples,))
+    df = pd.DataFrame({
+        'x': numeric_data,
+        '*2': numeric_data * 2. + np.random.normal(0, .1, (n_samples,)),
+        '**2': numeric_data ** 2 + np.random.normal(0, .1, (n_samples,)),
+        feature_col: random_data[feature_col].values,
+        label_col: random_data[label_col].values
+    })
+
+    df_train, df_test = train_test_split(df, test_size=.1)
+
+    imputer = AutoGluonImputer(
+        model_name="test_quadratic",
+        input_columns=['x', feature_col],
+        output_column="*2",
+        precision_threshold=.01,
+        numerical_confidence_quantile=.01
+    )
+
+    imputer.fit(train_df=df_train, time_limit=10)
+    df_pred = imputer.predict(df_test)
+
+    assert mean_squared_error(df_test['*2'], df_pred['*2_imputed']) < 1.0
+
+
+def test_precision_threshold(data_frame):
+    """
+    Basic integration test that tests AutoGluonImputer's ability to impute categorical
+    features with default settings.
     If this fails, some functionality around the approach used to derive the
     precision thresholds is defunct.
     """
@@ -103,17 +151,12 @@ def test_imputer(data_frame):
     imputer = AutoGluonImputer(
         model_name="test_quadratic",
         input_columns=['x', feature_col],
-        output_column="*2",
-        precision_threshold=.1,
-        numerical_confidence_quantile=.1
+        output_column="label",
+        precision_threshold=.01,
+        numerical_confidence_quantile=.01
     )
 
-    imputer.fit(
-        train_df=df_train,
-        time_limit=10
-    )
-
+    imputer.fit(train_df=df_train, time_limit=10)
     df_pred = imputer.predict(df_test)
-    #imputer.predict(df_test, inplace=True)
 
-    assert mean_squared_error(df_test['*2'], df_pred['*2_imputed']) < 1.0
+    assert f1_score(df_test['label'], df_pred['label_imputed']) > 0.7
