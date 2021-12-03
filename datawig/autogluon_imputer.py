@@ -45,10 +45,9 @@ class AutoGluonImputer():
     :param model_name: name of the AutoGluonImputer (as tring)
     :param input_columns: list of input column names (as strings)
     :param output_column: output column name (as string)
-    :param precision_threshold: precision threshold for imputation of categorical values; if predictions on a validation set were below that threshold, no imputation will be made
-    :param numerical_confidence_quantile: confidence quantile for imputation of numerical values (very experimental)
     :param verbosity: verbosity level from 0 to 2
     :param output_path: path to which the AutoGluonImputer is saved to
+    :param force_multiclass: treat target-column as a multiclass problem
 
     Example usage:
 
@@ -57,8 +56,8 @@ class AutoGluonImputer():
 
     def __init__(self,
                  model_name: str = 'AutoGluonImputer',
-                 output_column: str = None,
                  input_columns: List[str] = None,
+                 output_column: str = None,
                  verbosity: int = 0,
                  output_path: str = '',
                  force_multiclass: bool = False) -> None:
@@ -113,8 +112,8 @@ class AutoGluonImputer():
 
         if self.force_multiclass or not is_numeric_dtype(train_df[self.output_column]):
             if train_df[self.output_column].value_counts().max() < 10:
-                raise TargetColumnException(
-                    "Maximum class count below 10, cannot train imputation model")
+                raise TargetColumnException("Maximum class count below 10, "
+                                            "cannot train imputation model")
 
             self.predictor = TabularPredictor(label=self.output_column,
                                               problem_type='multiclass',
@@ -123,7 +122,7 @@ class AutoGluonImputer():
                 fit(train_data=train_df.dropna(subset=[self.output_column]),
                     time_limit=time_limit,
                     verbosity=self.verbosity,
-                    excluded_model_types=['GBM', 'XGB']) # due to libopm issue on OSX described here https://github.com/awslabs/autogluon/issues/1296
+                    excluded_model_types=['GBM', 'XGB'])  # due to libopm issue on OSX described here https://github.com/awslabs/autogluon/issues/1296
             y_test = test_df.dropna(subset=[self.output_column])
 
             # prec-rec curves for finding the likelihood thresholds for minimal
@@ -133,7 +132,8 @@ class AutoGluonImputer():
 
             for col_name in probas.columns:
                 prec, rec, thresholds = precision_recall_curve(y_test[self.output_column]==col_name,
-                                                              probas[col_name], pos_label=True)
+                                                               probas[col_name],
+                                                               pos_label=True)
                 self.precision_thresholds[col_name] = {'precisions': prec, 'thresholds': thresholds}
 
             self.classification_metrics = classification_report(y_test[self.output_column],
@@ -188,6 +188,10 @@ class AutoGluonImputer():
             modified object (True). Create copy of data_frame with additional columns, leave input unmodified (False).
         :return: data_frame original dataframe with imputations and likelihood in additional column
         """
+        if not self.predictor:
+            raise ValueError("No predictor has been trained. Run .fit() first,"
+                             " then continue with .predict().")
+
         if not inplace:
             df = data_frame.copy(deep=True)
         else:
@@ -202,6 +206,8 @@ class AutoGluonImputer():
                 class_mask = (imputations == label)
                 precisions = self.precision_thresholds[label]['precisions']
                 thresholds = self.precision_thresholds[label]['thresholds']
+
+                # get index of first fitted threshold that surpasses threshold
                 precision_above = (precisions >= precision_threshold).nonzero()[0][0]
                 threshold_for_minimal_precision = thresholds[min(precision_above, len(thresholds)-1)]
                 if precision_threshold > 0:
