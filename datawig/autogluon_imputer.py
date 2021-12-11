@@ -21,6 +21,7 @@ import os
 import pickle
 import inspect
 import warnings
+import platform
 from autogluon.tabular import TabularPredictor
 
 from typing import List, Dict, Any, Callable
@@ -102,6 +103,14 @@ class AutoGluonImputer():
                             separate for determining model convergence
         :param time_limit: time limit for AutoGluon in seconds
         """
+
+        p = platform.system()
+        exclude_models = ['CAT']
+        # due to libopm issue on OSX described here
+        # https://github.com/awslabs/autogluon/issues/1296
+        if p == 'Darwin':
+            exclude_models = exclude_models + ['GBM', 'XGB']
+
         if not test_df:
             train_df, test_df = train_test_split(train_df.copy(),
                                                  test_size=test_split)
@@ -118,11 +127,11 @@ class AutoGluonImputer():
             self.predictor = TabularPredictor(label=self.output_column,
                                               problem_type='multiclass',
                                               path=self.ag_model_path,
-                                              verbosity=0).\
+                                              verbosity=self.verbosity).\
                 fit(train_data=train_df.dropna(subset=[self.output_column]),
                     time_limit=time_limit,
                     verbosity=self.verbosity,
-                    excluded_model_types=['GBM', 'XGB'])  # due to libopm issue on OSX described here https://github.com/awslabs/autogluon/issues/1296
+                    excluded_model_types=exclude_models)
             y_test = test_df.dropna(subset=[self.output_column])
 
             # prec-rec curves for finding the likelihood thresholds for minimal
@@ -234,8 +243,7 @@ class AutoGluonImputer():
                  numerical_confidence_quantile=0.05,
                  model_name: str = "complete_model",
                  inplace: bool = False,
-                 time_limit: int = 30,
-                 verbosity=0):
+                 time_limit: int = 30):
         """
         Given a dataframe with missing values, this function detects all imputable columns, trains an imputation model
         on all other columns and imputes values for each missing value using AutoGluon.
@@ -243,7 +251,6 @@ class AutoGluonImputer():
         :param data_frame: original dataframe
         :param precision_threshold: precision threshold for categorical imputations (default: 0.0)
         :param inplace: whether or not to perform imputations inplace (default: False)
-        :param verbose: verbosity level, values > 0 log to stdout (default: 0)
         :param output_path: path to store model and metrics
         :return: dataframe with imputations
         """
@@ -267,7 +274,7 @@ class AutoGluonImputer():
                                            output_column=output_col,
                                            precision_threshold=precision_threshold,
                                            numerical_confidence_quantile=numerical_confidence_quantile,
-                                           verbosity=verbosity)\
+                                           verbosity=self.verbosity)\
                     .fit(data_frame, time_limit=time_limit)
                 tmp = imputer.predict(data_frame)
                 data_frame.loc[idx_missing, output_col] = tmp[str(output_col) + "_imputed"]
