@@ -49,7 +49,8 @@ class AutoGluonImputer():
     :param verbosity: verbosity level from 0 to 2
     :param output_path: path to which the AutoGluonImputer is saved to
     :param force_multiclass: treat target-column as a multiclass problem
-
+    :param label_count_threshold: the minimum number of times a label
+           must appear in dataset in order to be considered an output class
     Example usage:
 
 
@@ -61,7 +62,8 @@ class AutoGluonImputer():
                  output_column: str = None,
                  verbosity: int = 0,
                  output_path: str = '',
-                 force_multiclass: bool = False) -> None:
+                 force_multiclass: bool = False,
+                 label_count_threshold: int = 1) -> None:
 
         self.model_name = model_name
         self.input_columns = input_columns
@@ -71,6 +73,11 @@ class AutoGluonImputer():
         self.predictor_mean_absolute_error = None
         self.output_path = '.' if output_path == '' else output_path
         self.force_multiclass = force_multiclass
+        self.learner_kwargs = {
+                'label_count_threshold': label_count_threshold,
+                'positive_class': None,
+                'ignored_columns': None,
+                'cache_data': True}
 
     @property
     def imputed_column_name(self):
@@ -91,7 +98,8 @@ class AutoGluonImputer():
             test_df: pd.DataFrame = None,
             test_split: float = .1,
             time_limit: int = 30,
-            numerical_confidence_quantile=.05) -> Any:
+            numerical_confidence_quantile=.05,
+            **kwargs) -> Any:
         """
 
         Trains AutoGluonImputer model for a single column
@@ -127,11 +135,15 @@ class AutoGluonImputer():
             self.predictor = TabularPredictor(label=self.output_column,
                                               problem_type='multiclass',
                                               path=self.ag_model_path,
-                                              verbosity=self.verbosity).\
+                                              verbosity=self.verbosity,
+                                              learner_kwargs=self.learner_kwargs).\
                 fit(train_data=train_df.dropna(subset=[self.output_column]),
                     time_limit=time_limit,
                     verbosity=self.verbosity,
-                    excluded_model_types=exclude_models)
+                    excluded_model_types=exclude_models,
+                    hyperparameters=kwargs['hyperparameters'],
+                    hyperparameter_tune_kwargs=kwargs['hyperparameter_tune_kwargs']
+                    )
             y_test = test_df.dropna(subset=[self.output_column])
 
             # prec-rec curves for finding the likelihood thresholds for minimal
