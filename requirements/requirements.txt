@@ -1,1 +1,1 @@
-autogluon.tabular[all]
+autogluon.tabular==0.3.1
