@@ -63,7 +63,8 @@ class AutoGluonImputer():
                  verbosity: int = 0,
                  output_path: str = '',
                  force_multiclass: bool = False,
-                 label_count_threshold: int = 1) -> None:
+                 label_count_threshold: int = 10,
+                 ) -> None:
 
         self.model_name = model_name
         self.input_columns = input_columns
@@ -141,6 +142,7 @@ class AutoGluonImputer():
                     time_limit=time_limit,
                     verbosity=self.verbosity,
                     excluded_model_types=exclude_models,
+                    holdout_frac=kwargs['holdout_frac'],
                     hyperparameters=kwargs['hyperparameters'],
                     hyperparameter_tune_kwargs=kwargs['hyperparameter_tune_kwargs']
                     )
