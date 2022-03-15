@@ -78,7 +78,8 @@ class AutoGluonImputer():
                 'label_count_threshold': label_count_threshold,
                 'positive_class': None,
                 'ignored_columns': None,
-                'cache_data': True}
+                'cache_data': True
+                }
 
     @property
     def imputed_column_name(self):
@@ -99,8 +100,7 @@ class AutoGluonImputer():
             test_df: pd.DataFrame = None,
             test_split: float = .1,
             time_limit: int = 30,
-            numerical_confidence_quantile=.05,
-            **kwargs) -> Any:
+            numerical_confidence_quantile=.05) -> Any:
         """
 
         Trains AutoGluonImputer model for a single column
@@ -120,7 +120,7 @@ class AutoGluonImputer():
         if p == 'Darwin':
             exclude_models = exclude_models + ['GBM', 'XGB']
 
-        if not test_df:
+        if test_df is None:
             train_df, test_df = train_test_split(train_df.copy(),
                                                  test_size=test_split)
 
@@ -138,13 +138,15 @@ class AutoGluonImputer():
                                               path=self.ag_model_path,
                                               verbosity=self.verbosity,
                                               learner_kwargs=self.learner_kwargs).\
-                fit(train_data=train_df.dropna(subset=[self.output_column]),
+                fit(
+                    #train_data=train_df.dropna(subset=[self.output_column]),
+                    train_data=train_df,
+                    tuning_data=test_df,
                     time_limit=time_limit,
                     verbosity=self.verbosity,
                     excluded_model_types=exclude_models,
-                    holdout_frac=kwargs['holdout_frac'],
-                    hyperparameters=kwargs['hyperparameters'],
-                    hyperparameter_tune_kwargs=kwargs['hyperparameter_tune_kwargs']
+                    #hyperparameters=kwargs['hyperparameters'],
+                    #hyperparameter_tune_kwargs=kwargs['hyperparameter_tune_kwargs']
                     )
             y_test = test_df.dropna(subset=[self.output_column])
 
@@ -153,7 +155,7 @@ class AutoGluonImputer():
             self.precision_thresholds = {}
             probas = self.predictor.predict_proba(y_test)
 
-            for col_name in probas.columns:
+            for col_name in list(probas.columns):
                 prec, rec, thresholds = precision_recall_curve(y_test[self.output_column]==col_name,
                                                                probas[col_name],
                                                                pos_label=True)
@@ -257,7 +259,7 @@ class AutoGluonImputer():
                  numerical_confidence_quantile=0.05,
                  model_name: str = "complete_model",
                  inplace: bool = False,
-                 time_limit: int = 30):
+                 time_limit: int = 10):
         """
         Given a dataframe with missing values, this function detects all imputable columns, trains an imputation model
         on all other columns and imputes values for each missing value using AutoGluon.
