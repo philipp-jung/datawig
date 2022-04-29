@@ -49,6 +49,7 @@ class AutoGluonImputer():
     """
 
     def __init__(self,
+                 columns: List[str],
                  model_name: str = 'AutoGluonImputer',
                  input_columns: List[str] = None,
                  output_column: str = None,
@@ -57,6 +58,7 @@ class AutoGluonImputer():
                  ) -> None:
 
         self.model_name = model_name
+        self.columns = columns  # accessed by the imputer feature generator
         self.input_columns = input_columns
         self.output_column = output_column
         self.verbosity = verbosity
@@ -65,9 +67,7 @@ class AutoGluonImputer():
 
     @property
     def datawig_model_path(self):
-        return os.path.join(self.output_path,
-                            'datawigModels',
-                            f'{self.model_name}.pickle')
+        return os.path.join(self.output_path, 'datawigModels', f'{self.model_name}.pickle')
 
     @property
     def ag_model_path(self):
@@ -97,7 +97,6 @@ class AutoGluonImputer():
                                         "cannot train imputation model")
 
         self.predictor = TabularPredictor(label=self.output_column,
-                                      problem_type='multiclass',
                                       path=self.ag_model_path,
                                       verbosity=self.verbosity).\
         fit(train_data=train_df,
@@ -122,7 +121,7 @@ class AutoGluonImputer():
         """
 
         Saves model to disk. Requires the directory
-        `{self.output_path}/datawig_models` to exist.
+        `{self.output_path}/datawigModels` to exist.
 
         """
         params = {k: v for k, v in self.__dict__.items() if k != 'module'}
