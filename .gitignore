@@ -6,7 +6,7 @@ dist/
 
 label/
 datawig.egg-info
-datawig/__pycache__
+*/__pycache__
 test/__pycache__
 test/resources
 .cache
@@ -14,4 +14,5 @@ build
 .pytest_cache/
 experiments/
 docs/_build
-
+agModels/
+.ipynb_checkpoints/
