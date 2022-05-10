@@ -102,6 +102,7 @@ class AutoGluonImputer():
         fit(train_data=train_df,
             tuning_data=test_df,
             time_limit=time_limit,
+            calibrate=True,
             verbosity=self.verbosity)
 
         return self
