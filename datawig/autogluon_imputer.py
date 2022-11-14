@@ -25,6 +25,7 @@ import os
 import pickle
 import inspect
 from autogluon.tabular import TabularPredictor
+from pathlib import Path
 
 from typing import List, Any
 
@@ -63,15 +64,15 @@ class AutoGluonImputer():
         self.output_column = output_column
         self.verbosity = verbosity
         self.predictor = None
-        self.output_path = '.' if output_path == '' else output_path
+        self.output_path = Path('./') if output_path == '' else Path(output_path)
 
     @property
-    def datawig_model_path(self):
-        return os.path.join(self.output_path, 'datawigModels', f'{self.model_name}.pickle')
+    def datawig_model_path(self) -> Path:
+        return self.output_path / Path(f'datawigModels/{self.model_name}.pickle')
 
     @property
-    def ag_model_path(self):
-        return os.path.join(self.output_path, 'agModels', self.model_name)
+    def ag_model_path(self) -> Path:
+        return self.output_path / Path('agModels/self.model_name')
 
     def fit(self,
             train_df: pd.DataFrame,
@@ -120,11 +121,13 @@ class AutoGluonImputer():
 
     def save(self):
         """
-
-        Saves model to disk. Requires the directory
-        `{self.output_path}/datawigModels` to exist.
-
+        Saves model to disk. Creates the directory
+        `{self.output_path}/datawigModels` to to save the model to, and
+        creates it, if it doesn't exist.
         """
+        if not self.datawig_model_path.parent.exists():
+            self.datawig_model_path.parent.mkdir()
+
         params = {k: v for k, v in self.__dict__.items() if k != 'module'}
         pickle.dump(params, open(self.datawig_model_path, "wb"))
 
@@ -144,9 +147,9 @@ class AutoGluonImputer():
         :return: AutoGluonImputer model
 
         """
-        params = pickle.load(open(os.path.join(output_path,
-                                               "datawigModels",
-                                               f"{model_name}.pickle"), "rb"))
+        load_path = output_path / Path(f"datawigModels/{model_name}.pickle")
+        with open(load_path, 'rb') as f:
+            params = pickle.load(f.read())
         imputer_signature = inspect.getfullargspec(
             AutoGluonImputer.__init__)[0]
 
@@ -162,7 +165,6 @@ class AutoGluonImputer():
             setattr(imputer, arg, value)
 
         # lastly, load AG Model
-        imputer.predictor = TabularPredictor.load(os.path.join(output_path,
-                                                               "agModels",
-                                                               model_name))
+        ag_load_path = output_path / Path(f"agModels/{model_name}")
+        imputer.predictor = TabularPredictor.load(ag_load_path)
         return imputer
