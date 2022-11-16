@@ -149,7 +149,7 @@ class AutoGluonImputer():
         """
         load_path = output_path / Path(f"datawigModels/{model_name}.pickle")
         with open(load_path, 'rb') as f:
-            params = pickle.load(f.read())
+            params = pickle.load(f)
         imputer_signature = inspect.getfullargspec(
             AutoGluonImputer.__init__)[0]
 
